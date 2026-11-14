@@ -1,0 +1,277 @@
+# Mini SOC Lab – Splunk SIEM with Splunk SOAR Integration
+
+## Project Overview
+
+This project demonstrates the implementation of a Security Operations Center (SOC) lab using Splunk Enterprise and Linux-based log sources on Microsoft Azure.
+
+The objective is to build a centralized security monitoring environment that collects Linux authentication logs, detects suspicious login activity, generates security alerts, and integrates with Splunk SOAR for automated incident investigation and response.
+
+**Project Status:** SIEM implementation in progress; SOAR deployment and integration planned.
+
+## Architecture
+
+```text
+Linux VM – vmtest
+       |
+       | Splunk Universal Forwarder
+       | TCP 9997
+       v
+Splunk Enterprise – SOC-SPLUNK-01
+       |
+       v
+Security Index
+       |
+       v
+SPL Detection Searches
+       |
+       v
+Security Alerts
+       |
+       v
+Splunk App for SOAR Export
+       |
+       v
+Splunk SOAR – SOC-SOAR-01
+       |
+       v
+Automated Playbooks
+       |
+       v
+Incident Investigation and Response
+```
+
+The SOAR integration portion is planned and has not yet been deployed.
+
+## Infrastructure
+
+### VM 1 – SOC-SPLUNK-01
+
+- Cloud: Microsoft Azure
+- OS: Ubuntu Server 24.04 LTS
+- Splunk Enterprise: 10.6.1.1
+- CPU: 8 vCPUs
+- RAM: 16 GiB
+- OS Disk: 64 GiB
+- Private IP used in lab: 10.10.1.4
+- Role: Centralized SIEM server
+
+### VM 2 – splunktest
+
+- Cloud: Microsoft Azure
+- OS: Linux
+- Splunk Universal Forwarder: 10.6.1.1
+- Log source: `/var/log/auth.log`
+- Role: Linux security event generator
+
+### VM 3 – SOC-SOAR-01 (Planned)
+
+- Cloud: Microsoft Azure
+- Software: Splunk SOAR On-premises
+- OS: A Splunk-supported Linux distribution
+- Role: Security orchestration and automated response
+
+## Implementation Details
+
+### 1. Splunk Enterprise Installation
+
+Splunk Enterprise was installed on the centralized Linux VM.
+
+Installation directory:
+
+```bash
+/opt/splunk
+```
+
+Version verification:
+
+```bash
+sudo /opt/splunk/bin/splunk version
+```
+
+### 2. Configure Receiving Port
+
+Configured Splunk Enterprise to receive forwarded events through TCP port 9997.
+
+This allows Universal Forwarders to send events to the central SIEM.
+
+### 3. Universal Forwarder Installation
+
+Installed Splunk Universal Forwarder on the Linux test VM.
+
+Configured the forwarding destination:
+
+```bash
+/opt/splunkforwarder/bin/splunk add forward-server 10.10.1.4:9997
+```
+
+Configured credentials interactively during setup.
+
+Verified forwarding:
+
+```bash
+/opt/splunkforwarder/bin/splunk list forward-server -auth azureuser
+```
+
+Result: Active forwarding connection established.
+
+### 4. Linux Authentication Log Collection
+
+Configured collection of Linux authentication events from:
+
+```text
+/var/log/auth.log
+```
+
+Events were indexed in:
+
+```text
+security
+```
+
+The event sourcetype used in searches:
+
+```text
+linux_secure
+```
+
+Verified ingestion using:
+
+```spl
+index=security
+```
+
+### 5. SSH Failed Login Detection
+
+Used the following SPL query:
+
+```spl
+index=security sourcetype=linux_secure "Failed password"
+```
+
+This identifies failed SSH authentication attempts.
+
+### 6. Repeated Failed Login Detection
+
+```spl
+index=security sourcetype=linux_secure "Failed password"
+| rex "Failed password for (invalid user )?(?<username>\\S+) from (?<src_ip>\\S+)"
+| stats count as failed_attempts by src_ip username host
+| where failed_attempts >= 2
+| sort - failed_attempts
+```
+
+This query extracts usernames and source IP addresses, groups events and identifies repeated authentication failures.
+
+### 7. Security Dashboard
+
+Created a Splunk Dashboard Studio dashboard:
+
+**SOC Security Monitoring Dashboard**
+
+Planned panels:
+
+- Failed SSH Login Attempts
+- Successful SSH Logins
+- Suspicious Source IP Addresses
+- Authentication Events
+- Sudo Activity
+- Security Event Timeline
+
+### 8. Scheduled Security Alert
+
+Created a Splunk scheduled alert:
+
+**Alert Name:** Repeated SSH Login Failures
+
+Detection logic:
+
+- Search for failed SSH authentication events.
+- Group attempts by source IP and username.
+- Identify repeated failures.
+- Trigger an alert when matching results are returned.
+
+Email notification was configured. Actual delivery and alert execution remain to be verified.
+
+## SIEM vs SOAR
+
+**SIEM – Splunk Enterprise**
+
+- Log collection
+- Event indexing
+- Security monitoring
+- Threat detection
+- Alert generation
+
+**SOAR – Splunk SOAR**
+
+- Incident creation
+- Security orchestration
+- Threat intelligence enrichment
+- Automated investigation
+- Playbook execution
+- Incident response
+
+## Planned SOAR Integration
+
+A third Azure Linux VM will host Splunk SOAR On-premises.
+
+Planned integration components:
+
+- Splunk SOAR On-premises
+- Splunk App for SOAR Export
+- Splunk App for SOAR, where required
+- REST API connectivity
+- Security event forwarding
+- SOAR playbook automation
+
+Planned demonstration:
+
+1. Generate repeated failed SSH login attempts.
+2. Detect the activity using Splunk Enterprise.
+3. Trigger the configured security alert.
+4. Forward the event to Splunk SOAR.
+5. Create a SOAR investigation.
+6. Extract and investigate the source IP.
+7. Enrich the event using threat intelligence.
+8. Notify the security analyst.
+9. Execute an approved response action.
+
+## Learning Outcomes
+
+- Azure Linux infrastructure deployment
+- SIEM architecture
+- Splunk Enterprise administration
+- Universal Forwarder configuration
+- Centralized log management
+- SPL search and detection
+- SSH authentication monitoring
+- Security dashboard creation
+- Alert configuration
+- SIEM-to-SOAR integration
+- Security playbook automation
+- Incident response workflows
+
+## Project Status
+
+| Component | Status |
+|---|---|
+| Azure Splunk VM | Completed |
+| Azure Test VM | Completed |
+| Splunk Enterprise | Completed |
+| Universal Forwarder | Completed |
+| TCP 9997 forwarding | Working |
+| Linux authentication logs | Working |
+| Failed SSH detection | Working |
+| SOC dashboard | In progress |
+| Scheduled alert | Created, testing pending |
+| SOAR VM | Planned |
+| SOAR integration | Pending |
+| Automated playbooks | Pending |
+
+## Documentation
+
+- [Splunk Enterprise Documentation](https://help.splunk.com/en/splunk-enterprise)
+- [Splunk Universal Forwarder](https://help.splunk.com/en/splunk-universal-forwarder)
+- [Splunk SOAR On-premises](https://help.splunk.com/en/splunk-soar/soar-on-premises)
+
+**Note:** This is a hands-on learning and evaluation lab. Automated blocking and other disruptive response actions will only be enabled after authorization and validation.
