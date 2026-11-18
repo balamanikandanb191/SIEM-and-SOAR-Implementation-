@@ -1,0 +1,270 @@
+
+import phantom.rules as phantom
+import os
+import requests
+
+
+@phantom.playbook_block()
+def on_start(container):
+    phantom.debug("===== SOC INVALID LOGIN RESPONSE STARTED =====")
+
+    api_key = os.environ.get("VIRUSTOTAL_API_KEY")
+    phantom.debug(
+        "VirusTotal API key configured: {}".format(bool(api_key))
+    )
+
+    code_2(container=container)
+    return
+
+
+@phantom.playbook_block()
+def code_2(action=None, success=None, container=None, results=None,
+           handle=None, filtered_artifacts=None, filtered_results=None,
+           custom_function=None, loop_state_json=None, **kwargs):
+
+    phantom.debug("===== SSH LOGIN INVESTIGATION START =====")
+
+    if not container:
+        phantom.debug("ERROR: Container information is missing")
+        return
+
+    try:
+        # STEP 1: Extract SSH event details
+
+        source_ips = phantom.collect2(
+            container=container,
+            datapath=["artifact:*.cef.sourceAddress"],
+            scope="all"
+        )
+
+        usernames = phantom.collect2(
+            container=container,
+            datapath=["artifact:*.cef.destinationUserName"],
+            scope="all"
+        )
+
+        hostnames = phantom.collect2(
+            container=container,
+            datapath=["artifact:*.cef.deviceHostname"],
+            scope="all"
+        )
+
+        user_ids = phantom.collect2(
+            container=container,
+            datapath=["artifact:*.cef.destinationUserId"],
+            scope="all"
+        )
+
+        phantom.debug("========== SSH EVENT DETAILS ==========")
+        phantom.debug("Container ID: {}".format(container.get("id")))
+        phantom.debug("Event Name: {}".format(container.get("name")))
+        phantom.debug("Source IP: {}".format(source_ips))
+        phantom.debug("Username: {}".format(usernames))
+        phantom.debug("Hostname: {}".format(hostnames))
+        phantom.debug("User ID: {}".format(user_ids))
+
+        # STEP 2: Validate source IP
+
+        if not source_ips or not source_ips[0] or not source_ips[0][0]:
+            phantom.debug("ERROR: Source IP not found")
+            return
+
+        ip_address = source_ips[0][0]
+
+        username = (
+            usernames[0][0]
+            if usernames and usernames[0]
+            else "Unknown"
+        )
+
+        hostname = (
+            hostnames[0][0]
+            if hostnames and hostnames[0]
+            else "Unknown"
+        )
+
+        # STEP 3: Retrieve VirusTotal API key
+
+        api_key = os.environ.get("VIRUSTOTAL_API_KEY")
+
+        if not api_key:
+            phantom.debug("ERROR: VirusTotal API key unavailable")
+            return
+
+        phantom.debug("VirusTotal API key configured: True")
+
+        # STEP 4: VirusTotal API request
+
+        phantom.debug("===== VIRUSTOTAL LOOKUP STARTED =====")
+        phantom.debug("Checking IP: {}".format(ip_address))
+
+        url = (
+            "https://www.virustotal.com/api/v3/ip_addresses/{}"
+            .format(ip_address)
+        )
+
+        headers = {
+            "x-apikey": api_key,
+            "Accept": "application/json"
+        }
+
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=20
+        )
+
+        phantom.debug(
+            "VirusTotal HTTP Status: {}".format(response.status_code)
+        )
+
+        # STEP 5: Process VirusTotal response
+
+        if response.status_code == 200:
+
+            result = response.json()
+            attributes = result.get("data", {}).get("attributes", {})
+            stats = attributes.get("last_analysis_stats", {})
+
+            malicious = stats.get("malicious", 0)
+            suspicious = stats.get("suspicious", 0)
+            harmless = stats.get("harmless", 0)
+            undetected = stats.get("undetected", 0)
+
+            reputation = attributes.get(
+                "reputation", "Not available"
+            )
+
+            phantom.debug("========== VIRUSTOTAL RESULTS ==========")
+            phantom.debug("IP Address: {}".format(ip_address))
+            phantom.debug("Reputation: {}".format(reputation))
+            phantom.debug("Malicious: {}".format(malicious))
+            phantom.debug("Suspicious: {}".format(suspicious))
+            phantom.debug("Harmless: {}".format(harmless))
+            phantom.debug("Undetected: {}".format(undetected))
+
+            # STEP 6: Automated risk classification
+
+            if malicious >= 10:
+                risk_level = "HIGH"
+                risk_reason = "High malicious detection count"
+
+            elif malicious >= 3:
+                risk_level = "MEDIUM"
+                risk_reason = "Moderate malicious detection count"
+
+            else:
+                risk_level = "LOW"
+                risk_reason = "Low malicious detection count"
+
+            # STEP 7: Display SOC risk assessment
+
+            phantom.debug("========== SOC RISK ASSESSMENT ==========")
+            phantom.debug("IP Address: {}".format(ip_address))
+            phantom.debug("Risk Level: {}".format(risk_level))
+            phantom.debug("Risk Reason: {}".format(risk_reason))
+
+            # STEP 8: Update SOAR container severity
+
+            severity = risk_level.lower()
+
+            phantom.set_severity(container, severity)
+
+            phantom.debug(
+                "SOAR case severity updated to: {}".format(risk_level)
+            )
+
+            # STEP 9: Prepare investigation note
+
+            note_content = (
+                "**SSH Login Investigation Report**\n\n"
+                "**Event Details**\n"
+                "- Source IP: {}\n"
+                "- Username: {}\n"
+                "- Hostname: {}\n\n"
+                "**VirusTotal Intelligence**\n"
+                "- Reputation: {}\n"
+                "- Malicious detections: {}\n"
+                "- Suspicious detections: {}\n"
+                "- Harmless detections: {}\n"
+                "- Undetected: {}\n\n"
+                "**SOC Risk Assessment**\n"
+                "- Risk Level: {}\n"
+                "- Risk Reason: {}\n\n"
+                "**Investigation Status:** Automated analysis completed. "
+                "Further analyst review is recommended."
+            ).format(
+                ip_address,
+                username,
+                hostname,
+                reputation,
+                malicious,
+                suspicious,
+                harmless,
+                undetected,
+                risk_level,
+                risk_reason
+            )
+
+            # STEP 10: Add note to SOAR container
+
+            phantom.debug("===== CREATING SOAR INVESTIGATION NOTE =====")
+
+            note_success, note_message, note_id = phantom.add_note(
+                container=container,
+                note_type="general",
+                title="Automated SSH Login Investigation",
+                content=note_content,
+                note_format="markdown"
+            )
+
+            phantom.debug(
+                "Investigation note success: {}".format(note_success)
+            )
+            phantom.debug(
+                "Investigation note message: {}".format(note_message)
+            )
+            phantom.debug(
+                "Investigation note ID: {}".format(note_id)
+            )
+
+            phantom.debug("===== VIRUSTOTAL LOOKUP COMPLETED =====")
+
+        elif response.status_code == 401:
+            phantom.debug("ERROR: VirusTotal API key rejected")
+
+        elif response.status_code == 403:
+            phantom.debug("ERROR: VirusTotal API access forbidden")
+
+        elif response.status_code == 404:
+            phantom.debug("ERROR: IP report not found")
+
+        elif response.status_code == 429:
+            phantom.debug("ERROR: VirusTotal API rate limit exceeded")
+
+        else:
+            phantom.debug(
+                "VirusTotal API error: {}".format(response.text[:300])
+            )
+
+    except requests.exceptions.Timeout:
+        phantom.debug("ERROR: VirusTotal API request timed out")
+
+    except requests.exceptions.RequestException as e:
+        phantom.debug(
+            "ERROR: VirusTotal connection failed: {}".format(str(e))
+        )
+
+    except Exception as e:
+        phantom.debug(
+            "INVESTIGATION ERROR: {}".format(str(e))
+        )
+
+    phantom.debug("========== INVESTIGATION COMPLETE ==========")
+    return
+
+
+@phantom.playbook_block()
+def on_finish(container, summary):
+    phantom.debug("===== SOC INVALID LOGIN RESPONSE FINISHED =====")
+    return
